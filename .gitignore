@@ -1,0 +1,24 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# model weights and audio never go in git
+models/
+*.safetensors
+*.nemo
+*.wav
+!loadtest/probe/*.wav
+
+# terraform state and secrets
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfvars
+!**/example.tfvars
+**/.terraform.lock.hcl
+
+# local kube/gcloud artefacts
+kubeconfig*
+*.json.key
