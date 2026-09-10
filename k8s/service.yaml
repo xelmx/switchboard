@@ -1,0 +1,16 @@
+# One stable address in front of whichever pods are ready.
+# type LoadBalancer: Docker Desktop maps it to localhost; on GKE it becomes a
+# real external address. Same manifest, both places.
+apiVersion: v1
+kind: Service
+metadata:
+  name: switchboard
+  namespace: switchboard
+  labels: { app: switchboard }
+spec:
+  type: LoadBalancer
+  selector: { app: switchboard }
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

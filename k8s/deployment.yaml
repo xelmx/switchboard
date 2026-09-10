@@ -1,0 +1,60 @@
+# "I want N copies of this image, kept healthy, updated one at a time."
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: switchboard
+  namespace: switchboard
+  labels: { app: switchboard }
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: switchboard }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1          # bring one new pod up...
+      maxUnavailable: 0    # ...before taking any old one down
+  template:
+    metadata:
+      labels: { app: switchboard }
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: switchboard
+          image: switchboard:dev
+          imagePullPolicy: IfNotPresent   # built locally; nothing to pull
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: DEVICE
+              value: "cpu"                # Docker Desktop's cluster has no GPU
+            - name: DTYPE
+              value: "fp32"
+          resources:
+            requests:                     # what the scheduler reserves
+              cpu: "1"
+              memory: 3Gi                 # 2.5 GB of fp32 weights + torch
+            limits:                       # where the pod gets killed
+              cpu: "4"
+              memory: 4Gi
+          # Give the model time to load before liveness starts judging.
+          startupProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 2
+            failureThreshold: 60          # up to 120 s
+          # Not ready -> the Service stops sending this pod traffic. No restart.
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+            failureThreshold: 2
+          # Not alive -> restart the container.
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              # On shutdown, keep answering for a moment while the Service
+              # forgets this pod - otherwise in-flight requests hit a closed port.
+              exec: { command: ["sleep", "3"] }

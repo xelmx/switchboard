@@ -212,3 +212,106 @@ torch + CUDA libraries, a 2.5 GB layer of weights, 0.2 GB of OS. Full table in
 - 
 
 ---
+
+## Task 3 — a local cluster (Kubernetes, via Docker Desktop)
+
+**What it is.** Kubernetes is a program that runs containers *for* you. You
+tell it what you want — "three copies of this image, each needing this much
+memory, answering on this port, and here's how to check they're healthy" —
+and it makes that true and *keeps* it true: a copy dies, it starts another;
+a node fills up, it places the next copy elsewhere; a new image version
+arrives, it swaps copies one at a time without dropping requests. Docker
+Desktop ships a single-node cluster; it's the same Kubernetes as the cloud,
+just one machine.
+
+**Why it's here.** Tasks 4–10 all speak Kubernetes: Helm packages Kubernetes
+objects, Terraform builds a Kubernetes cluster, KEDA and Argo Rollouts are
+Kubernetes controllers. Learning the four objects below on a laptop, where a
+mistake costs nothing, is what makes the cloud tasks about the cloud rather
+than about Kubernetes.
+
+**What goes wrong without it.** `docker run` gives you one container that
+stays dead when it dies, can't be updated without downtime, and can't be
+scaled without a human. That's the gap between "a container" and "a
+service someone can rely on".
+
+**The four objects, in plain terms:**
+
+- **Pod** — one running copy of the container (plus its own IP). The unit
+  that lives and dies.
+- **Deployment** — "I want N pods of this image, updated this way." It owns
+  the pods and replaces them. This is where the probes and the resource
+  limits are declared.
+- **Service** — one stable address in front of the pods, spreading requests
+  across whichever are *ready*. Pods come and go; the Service doesn't.
+- **Namespace** — a folder, so this project's objects don't mix with others.
+
+**Two declarations that matter for a model server:**
+
+- **Probes.** `livenessProbe` → `/healthz`: fail it and Kubernetes restarts
+  the pod. `readinessProbe` → `/readyz`: fail it and the Service simply
+  stops sending that pod traffic. A `startupProbe` gives the model time to
+  load before liveness starts judging — without it, Kubernetes would kill
+  a healthy pod for taking 15 s to become useful. This is task 1's
+  liveness/readiness lesson, now enforced by the platform.
+- **Resources.** `requests` is what the scheduler reserves; `limits` is
+  where the pod gets killed. A pod with 2.5 GB of weights in fp32 needs
+  ~3 GB; declare it, or the scheduler packs pods onto a node that can't
+  hold them.
+
+**CPU-only, on purpose.** Docker Desktop's Kubernetes doesn't see the GPU
+without extra plumbing that isn't worth an evening; the image's `DEVICE=cpu`
+switch (task 2) runs the same model at ~13× real time, which is plenty to
+prove scheduling, self-healing and rolling updates. GPU-in-Kubernetes first
+happens on GKE in task 9, where the platform installs the driver itself.
+
+**The proof:**
+
+```
+wsl -d Ubuntu-24.04 -- bash -lc 'cd /mnt/c/Users/lyle/Projects/xelmx/switchboard && bash scripts/prove-task3.sh'
+```
+
+It applies the manifests, waits for the pods to become ready, transcribes the
+probe clip through the Service, **deletes a pod and watches Kubernetes replace
+it**, then performs a **rolling update while requests are flowing** and counts
+how many failed. The number to look for is zero.
+
+**What it measured (2026-09-10, 2 replicas, CPU):**
+
+| check | result |
+|---|---:|
+| pods ready from apply | 14 s |
+| pod deleted → replaced and ready | **13 s** |
+| rolling update under load | 29 s, 21 requests, **0 failed** |
+
+The events log during the update is the lesson in one screen: the new pod's
+startup probe fails with *connection refused*, then with *503* while the
+weights load, and only when it turns ready does Kubernetes kill the old pod.
+Task 1's readiness endpoint, now enforced by the platform.
+
+**Three things learned the hard way:**
+
+1. **The cluster node has its own image store.** Docker Desktop now runs its
+   Kubernetes node as a separate container; an image built with `docker build`
+   is not automatically inside it. Pods would sit in `ErrImagePull` forever
+   with `imagePullPolicy: IfNotPresent`. Fix for a laptop: `docker save … |
+   docker exec -i desktop-control-plane ctr -n k8s.io images import -`
+   (142 s for 6.6 GB). This is exactly why the cloud has a *registry* — a
+   shared image store every node pulls from — which is task 5's Artifact
+   Registry.
+2. **`kubectl apply -f dir/` goes alphabetically.** `deployment.yaml` was
+   applied before `namespace.yaml` existed and was rejected; the Service (later
+   in the alphabet) was created. Renamed to `00-namespace.yaml` and applied
+   explicitly first. Helm (task 4) orders objects by kind for exactly this
+   reason.
+3. **Replicas are a memory decision, not a default.** Each fp32 CPU pod needs
+   ~3 GB; a rolling update briefly runs one more. With ~6 GB free on the host
+   that evening, three copies didn't fit; two did. `requests`/`limits` in the
+   manifest are what make that arithmetic visible before the scheduler
+   discovers it.
+
+**Explain-back** *(mine, after the task)*:
+
+- 
+
+---

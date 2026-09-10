@@ -5,7 +5,7 @@ Host: RTX 4060 8 GB, Docker Desktop on WSL2. Times are from `docker run` (image 
 
 | run | device | alive | ready | model load | first request | warm request |
 |---|---|---:|---:|---:|---:|---:|
-| gpu | cuda | 3.1 s | 13.0 s | 2.6 s | 906 ms | 82 ms |
-| cpu | cpu | 2.2 s | 9.4 s | 1.2 s | 558 ms | 515 ms |
+| gpu | cuda | 3.5 s | 15.0 s | 3.5 s | 1226 ms | 198 ms |
+| cpu | cpu | 2.2 s | 9.5 s | 1.0 s | 639 ms | 545 ms |
 
 Task 1 (no container, warm process): ready at ~22-25 s, warm request ~90-230 ms.
