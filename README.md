@@ -17,7 +17,7 @@ Work in progress. `NOTES.md` is the running log, one entry per tool.
 |---|---|---|---|
 | 0 | toolchain | WSL2 Ubuntu, kubectl, helm, terraform, gcloud | done — explain-back pending |
 | 1 | the service | FastAPI + prometheus-client | done — explain-back pending |
-| 2 | the container | Docker | |
+| 2 | the container | Docker | done — explain-back pending |
 | 3 | a local cluster | Kubernetes (Docker Desktop) | |
 | 4 | packaging | Helm | |
 | 5 | the cloud, from code | Terraform + GKE Autopilot | |

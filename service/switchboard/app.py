@@ -152,3 +152,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     s = config.load()
     uvicorn.run("switchboard.app:app", host="0.0.0.0", port=s.port, workers=1, log_level="info")
+
+
+if __name__ == "__main__":  # `python -m switchboard.app` - how the container starts
+    main()
