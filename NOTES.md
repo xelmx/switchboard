@@ -550,6 +550,14 @@ you think.
   order that avoids this, and prints the three `gcloud ... list` commands that
   prove nothing is left.
 
+**One permission you would otherwise meet as a failure.** Cloud Build runs as
+the project's *Compute Engine* default service account, which in a new project
+can do nothing useful. `terraform/build_iam.tf` grants it
+`roles/cloudbuild.builds.builder` — Google's bundle of the storage, Artifact
+Registry and logging permissions a build needs. Without it the first
+`gcloud builds submit` fails on a service account nobody created, which is a
+hard error to place.
+
 **What it costs (checked 2026-09-14).** A flat cluster management fee of
 **$0.10 per cluster per hour**, and a GKE free tier of **$74.40 of monthly
 credit per billing account** — enough for exactly one Autopilot cluster's
