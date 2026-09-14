@@ -315,3 +315,145 @@ Task 1's readiness endpoint, now enforced by the platform.
 - 
 
 ---
+
+## Task 4 — packaging (Helm)
+
+**What it is.** Two things wearing one name. First, a template engine: the
+YAML from task 3 with every number that changes between a laptop and a cloud
+pulled out into `values.yaml`, so one chart renders all of them. Second — and
+the part that isn't obvious from tutorials — a **release ledger**. Helm stores
+every install and upgrade in the cluster as a numbered revision, so "what is
+deployed right now" is a question with an answer, and "put back what was there
+before" is one command.
+
+**Why it's here.** Two reasons, and the second is the bigger one.
+
+1. The same service has to run in at least four shapes before this project is
+   done: CPU/fp32 on a laptop, CPU on GKE, GPU/fp16 on an L4 node, and again on
+   AKS. That's one difference of a dozen values, not four copies of `k8s/`.
+2. Everything installed from task 6 onward *is* a Helm chart — Prometheus,
+   Grafana, KEDA, Argo Rollouts. Not learning Helm means not being able to read
+   what those tasks install.
+
+**What goes wrong without it.** The `k8s/` directory from task 3 has the image
+tag, the replica count and `DEVICE=cpu` written into the file. Changing an
+environment means editing a tracked file or `sed`-ing it in CI; there is no
+record of what is actually running, and no undo. Task 3 also found that
+`kubectl apply -f k8s/` applies files *alphabetically*, which is why the
+namespace had to be renamed `00-namespace.yaml` — Helm sorts objects by kind
+and installs them in dependency order, so that class of bug stops existing.
+
+**The four pieces:**
+
+- **`Chart.yaml`** — the chart's name, its own `version`, and `appVersion`, the
+  version of the software inside. Two different numbers on purpose: changing a
+  probe timeout bumps the chart, not the app.
+- **`values.yaml`** — every switch, with the laptop's answer as the default.
+  Anything not in here is a decision the chart has taken away from you.
+- **`templates/`** — the task 3 manifests with `{{ }}` where the values go,
+  plus `_helpers.tpl` (names and labels computed once) and `NOTES.txt` (what
+  Helm prints after an install).
+- **the release** — a name plus a namespace. `switchboard` in namespace
+  `switchboard` at revision 4 is a different thing from the chart on disk.
+
+**Two details that bite:**
+
+- **Two label sets, not one.** `selectorLabels` (name + instance) is what the
+  Deployment matches pods on, and a Deployment's selector is **immutable**. The
+  wider `labels` set adds chart version and `managed-by` for humans. Put the
+  chart version in the selector and the first upgrade after a version bump is
+  rejected by the API server, permanently, until the Deployment is deleted.
+- **The namespace is not in the chart.** `--create-namespace` makes it instead.
+  A templated `Namespace` object belongs to the release, so `helm uninstall`
+  deletes it — and everything else anyone put in it. Tasks 6–8 install other
+  charts into this namespace, so it must outlive any one release.
+
+**What Helm adds that `kubectl apply` cannot:**
+
+- `helm test` — the chart ships its own smoke test. Installing is not the same
+  as answering; `templates/tests/transcribe.yaml` is a pod that curls
+  `/healthz`, `/readyz` and `/metrics` through the Service and fails the
+  release if any of them is wrong.
+- `helm rollback` — the point of the ledger. The proof upgrades to an image tag
+  that does not exist, watches the release fail, and puts it back with one
+  command, counting the requests that failed meanwhile.
+
+**`values-fake.yaml` — proving mechanics on a full laptop.** A real pod needs
+~3 GB and this machine usually has the work stack running. `FAKE_MODEL=1`
+(built in task 1) answers without loading weights, so a pod costs ~200 MB and
+three fit anywhere. Rollouts, probes, revisions and rollbacks behave
+identically; transcripts don't, so nothing is ever *measured* with it.
+
+**Helm 4 is not Helm 3.** The installed version is v4.3.0, and two flags changed
+shape: `--wait` is now a *strategy* (`--wait` alone means `watcher`; omitted
+means `hookOnly`, which does **not** wait for pods), and `--dry-run` takes a
+string (`client` or `server`) rather than being a boolean. Every Helm 3 tutorial
+command that ends in `--wait --timeout 5m0s` still works; `--dry-run` alone no
+longer means what it used to.
+
+**The proof:**
+
+```
+wsl -d Ubuntu-24.04 -- bash -lc 'cd /mnt/c/Users/lyle/Projects/xelmx/switchboard && bash scripts/prove-task4.sh'
+```
+
+Lints and renders the chart with no cluster involved, installs it into a new
+namespace in one command, runs the chart's own test, scales by `--set` (a new
+revision, not an edited file), then **upgrades to a broken image under load**
+and rolls back — counting failed requests. The number to look for is zero: a
+release can be completely broken without the service ever going down, because
+`maxUnavailable: 0` means the old pods are never taken away until new ones are
+ready. It finishes by upgrading to the chart's own defaults — the real
+weights, no `-f` at all — and transcribing the probe clip for real.
+
+**What it measured (2026-09-14, `values-fake.yaml` unless noted):**
+
+| check | result |
+|---|---:|
+| objects rendered from the chart | 3 |
+| `helm install --wait` to all replicas ready | 4 s |
+| `helm test` (healthz, readyz, metrics) | pass |
+| scale by `--set replicaCount` | revision 2 |
+| broken upgrade refused | 93 s (the 90 s `--wait` budget) |
+| `helm rollback` to the good revision | **0 s** |
+| requests during the break **and** the rollback | 302 |
+| failed requests | **0** |
+| the same chart on its own defaults (real weights) | 13 s to ready |
+| what answered | ParakeetForTDT, 1626 ms for 6.6 s of audio |
+
+The rollback taking no measurable time is the finding, not a broken timer.
+`maxUnavailable: 0` meant the four good pods were never taken away; the broken
+release only ever managed to create one pod that couldn't pull its image. A
+rollback therefore had nothing to build — it reverted the Deployment's spec to
+a ReplicaSet that was already at full size. The release was broken for 93
+seconds and the service never noticed.
+
+**Three things learned the hard way:**
+
+1. **`--wait` is where the safety lives, and Helm 4 changed it.** Without a
+   wait strategy, `helm upgrade` returns the moment the API server accepts the
+   objects — success, by Helm's account, for a release whose pods will never
+   start. The broken upgrade above is only *detected* because `--wait` sat
+   there for 90 seconds watching pods that never became ready. In Helm 4
+   `--wait` is a strategy, not a boolean, and the default when the flag is
+   omitted is `hookOnly`: it waits for hooks and not for your pods.
+2. **The preStop window is visible from outside.** A request sent the instant
+   `helm upgrade --wait` returned came back from the *old* pod —
+   `"class":"FakeModel"` after upgrading to the real weights. Nothing was
+   wrong: the old pod was in its 3-second `preStop` sleep and still in the
+   Service's endpoints, which is exactly the behaviour that makes a rolling
+   update lossless. "The upgrade is done" and "every reply now comes from the
+   new version" are two different moments, and anything that checks a
+   deployment by curling it once has to know that.
+3. **The node's image store survived, and that is also a trap.** Docker
+   Desktop's Kubernetes wedged in `starting` for half an hour; a restart fixed
+   it, and `switchboard:dev` was still in the node from task 3, so the 6.6 GB
+   import didn't repeat. Convenient here, misleading in general: an image that
+   is present *because of something you did a week ago* is the exact state a
+   registry exists to remove. Task 5 replaces it.
+
+**Explain-back** *(mine, after the task)*:
+
+- 
+
+---

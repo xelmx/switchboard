@@ -1,0 +1,16 @@
+apiVersion: v2
+name: switchboard
+description: Parakeet-TDT-0.6B speech-to-text served over HTTP, on Kubernetes.
+type: application
+
+# version    — the chart's own version. Bump when the templates change.
+# appVersion — the software inside. Here it tracks the image tag.
+version: 0.1.0
+appVersion: "dev"
+
+home: https://github.com/xelmx/switchboard
+sources:
+  - https://github.com/xelmx/switchboard
+  - https://github.com/xelmx/dialtone
+maintainers:
+  - name: xelmx

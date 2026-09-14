@@ -1,0 +1,88 @@
+# "I want N copies of this image, kept healthy, updated one at a time."
+# Task 3's deployment.yaml, with every number that changed between a laptop and
+# a cloud pulled out into values.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "switchboard.fullname" . }}
+  labels:
+    {{- include "switchboard.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "switchboard.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: {{ .Values.rollout.maxSurge }}
+      maxUnavailable: {{ .Values.rollout.maxUnavailable }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "switchboard.selectorLabels" . | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+          env:
+            {{- with .Values.model.id }}
+            - name: MODEL_ID
+              value: {{ . | quote }}
+            {{- end }}
+            - name: DEVICE
+              value: {{ .Values.model.device | quote }}
+            - name: DTYPE
+              value: {{ .Values.model.dtype | quote }}
+            - name: PORT
+              value: {{ .Values.service.port | quote }}
+            {{- if .Values.model.fake }}
+            - name: FAKE_MODEL
+              value: "1"
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          # Give the model time to load before liveness starts judging.
+          startupProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+          # Not ready -> the Service stops sending this pod traffic. No restart.
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          # Not alive -> restart the container.
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          lifecycle:
+            preStop:
+              # On shutdown, keep answering for a moment while the Service
+              # forgets this pod - otherwise in-flight requests hit a closed port.
+              exec: { command: ["sleep", "{{ .Values.preStopSleepSeconds }}"] }

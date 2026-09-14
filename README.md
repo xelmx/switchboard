@@ -19,7 +19,7 @@ Work in progress. `NOTES.md` is the running log, one entry per tool.
 | 1 | the service | FastAPI + prometheus-client | done — explain-back pending |
 | 2 | the container | Docker | done — explain-back pending |
 | 3 | a local cluster | Kubernetes (Docker Desktop) | done — explain-back pending |
-| 4 | packaging | Helm | |
+| 4 | packaging | Helm | done — explain-back pending |
 | 5 | the cloud, from code | Terraform + GKE Autopilot | |
 | 6 | seeing it | Prometheus + Grafana | |
 | 7 | scaling | KEDA | |

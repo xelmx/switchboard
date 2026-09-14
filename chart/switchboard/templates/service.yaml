@@ -1,0 +1,15 @@
+# One stable address in front of whichever pods are ready.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "switchboard.fullname" . }}
+  labels:
+    {{- include "switchboard.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "switchboard.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http

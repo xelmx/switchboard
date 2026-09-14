@@ -1,0 +1,24 @@
+{{ .Chart.Name }} {{ .Chart.Version }} installed as release "{{ .Release.Name }}" in namespace {{ .Release.Namespace }}.
+
+  {{ .Values.replicaCount }} replica(s) of {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }} on {{ .Values.model.device }}/{{ .Values.model.dtype }}{{ if .Values.model.fake }}  (FAKE_MODEL - no weights loaded){{ end }}
+
+Watch them come up:
+
+  kubectl -n {{ .Release.Namespace }} rollout status deployment/{{ include "switchboard.fullname" . }}
+
+{{- if eq .Values.service.type "LoadBalancer" }}
+
+Reach the service (Docker Desktop maps LoadBalancer to localhost):
+
+  curl -s -F "file=@loadtest/probe/1089-134686-0002.wav" http://localhost:{{ .Values.service.port }}/v1/transcribe
+{{- else }}
+
+Reach the service:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "switchboard.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+{{- end }}
+
+Check it answers, then see what this release actually is:
+
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+  helm history {{ .Release.Name }} -n {{ .Release.Namespace }}

@@ -1,0 +1,26 @@
+# Prove the cluster mechanics on a host with no spare memory.
+#
+#   helm install switchboard chart/switchboard -f chart/switchboard/values-fake.yaml
+#
+# FAKE_MODEL makes the service answer without loading any weights, so a pod
+# costs ~200 MB instead of ~3 GB and three of them fit anywhere. Rollouts,
+# rollbacks, probes and the Service all behave identically. Transcripts do not:
+# never measure anything with this file.
+model:
+  fake: true
+
+replicaCount: 3
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+# Nothing to load, so the startup budget can be short.
+probes:
+  startup:
+    periodSeconds: 2
+    failureThreshold: 15

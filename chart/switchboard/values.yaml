@@ -1,0 +1,75 @@
+# Every switch the same chart needs to run on a laptop, on GKE, and on a GPU
+# node. Defaults here are the laptop: CPU, fp32, two copies, image built locally.
+
+replicaCount: 2
+
+image:
+  repository: switchboard
+  tag: dev
+  # IfNotPresent: built locally, there is nothing to pull. On GKE this becomes
+  # an Artifact Registry path and the policy stops mattering (task 5).
+  pullPolicy: IfNotPresent
+
+# The knobs the image reads as environment variables
+# (service/switchboard/config.py). Same image everywhere; only these change.
+model:
+  id: ""        # "" -> the image default: the weights baked in at task 2
+  device: cpu   # auto | cpu | cuda   — Docker Desktop's cluster has no GPU
+  dtype: fp32   # auto | fp32 | fp16 | bf16
+  # FAKE_MODEL=1 -> the service answers without loading any weights. Lets the
+  # cluster mechanics (rollout, rollback, scheduling) be proven on a host with
+  # no spare memory. Never true for a real measurement.
+  fake: false
+
+# Anything else to put in the container's environment, as name/value pairs.
+extraEnv: []
+
+service:
+  # LoadBalancer: Docker Desktop maps it to localhost; GKE gives it a real
+  # external address. ClusterIP once something else fronts it.
+  type: LoadBalancer
+  port: 8000
+
+# requests is what the scheduler reserves; limits is where the pod gets killed.
+# 2.5 GB of fp32 weights + torch needs ~3 GB. With model.fake=true, cut these.
+resources:
+  requests:
+    cpu: "1"
+    memory: 3Gi
+  limits:
+    cpu: "4"
+    memory: 4Gi
+
+# startup  — how long the model may take to load before liveness starts judging
+#            (periodSeconds x failureThreshold = the budget; 2 x 60 = 120 s)
+# readiness— fail it and the Service stops sending this pod traffic. No restart.
+# liveness — fail it and the container is restarted.
+probes:
+  startup:
+    periodSeconds: 2
+    failureThreshold: 60
+  readiness:
+    periodSeconds: 5
+    failureThreshold: 2
+  liveness:
+    periodSeconds: 10
+    failureThreshold: 3
+
+# maxUnavailable: 0 is what makes a zero-failure rolling update possible —
+# a new pod must be ready before any old one is taken down.
+rollout:
+  maxSurge: 1
+  maxUnavailable: 0
+
+terminationGracePeriodSeconds: 30
+# Keep answering for a moment on shutdown while the Service forgets this pod.
+preStopSleepSeconds: 3
+
+podAnnotations: {}   # task 6 puts the Prometheus scrape hints here
+nodeSelector: {}     # task 9 puts the GPU node selector here
+tolerations: []
+affinity: {}
+
+# The image `helm test` runs. Only needs curl.
+tests:
+  image: curlimages/curl:8.11.1
