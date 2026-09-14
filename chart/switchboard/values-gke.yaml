@@ -1,0 +1,52 @@
+# GKE Autopilot. Same chart as the laptop; these are the values that differ.
+#
+#   helm install switchboard chart/switchboard -n switchboard --create-namespace \
+#     -f chart/switchboard/values-gke.yaml \
+#     --set image.repository="$(terraform -chdir=terraform output -raw registry)/switchboard"
+#
+# image.repository is set on the command line rather than written here: it
+# contains the project id, which is per-person and not something to commit.
+
+image:
+  # Set from the Terraform output. Artifact Registry, same region as the
+  # cluster - a registry in another region means every pull is billed egress
+  # and takes noticeably longer.
+  repository: SET-ON-THE-COMMAND-LINE
+  tag: v1
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+model:
+  device: cpu   # task 9 switches this to cuda on an L4 node
+  dtype: fp32
+
+service:
+  # On GKE this provisions a real external address, billed per hour plus
+  # traffic. It is the most expensive thing here after the pods; task 11's
+  # teardown exists largely because of it.
+  type: LoadBalancer
+  port: 8000
+
+# Autopilot bills the pod's *requests*, and requires the CPU:memory ratio to
+# sit between 1:1 and 1:6.5 for the general-purpose compute class. 2 CPU to
+# 4 GiB is 1:2. Requests and limits are set equal on Google's own advice: it
+# makes the bill predictable and stops the pod's behaviour depending on
+# whether the cluster happens to support bursting.
+resources:
+  requests:
+    cpu: "2"
+    memory: 4Gi
+  limits:
+    cpu: "2"
+    memory: 4Gi
+
+# The model still loads in ~1 s, so the startup budget doesn't change. What
+# does change is what happens *before* the probe starts: Autopilot may have to
+# provision a node and pull a ~6.6 GB image, and none of that counts against
+# startupProbe - it happens while the pod is still ContainerCreating. That
+# wait belongs to `helm --timeout`, not to the probe.
+probes:
+  startup:
+    periodSeconds: 2
+    failureThreshold: 60

@@ -17,7 +17,8 @@ models/
 **/*.tfstate.*
 **/*.tfvars
 !**/example.tfvars
-**/.terraform.lock.hcl
+# .terraform.lock.hcl is NOT ignored: it is what actually pins the provider
+# version, and it is meant to be committed so every apply resolves the same way.
 
 # local kube/gcloud artefacts
 kubeconfig*

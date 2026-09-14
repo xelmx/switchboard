@@ -1,0 +1,33 @@
+# Build the image inside Google's network instead of on a home connection.
+#
+# The Dockerfile downloads the model weights itself (2.5 GB from HuggingFace)
+# and the result is ~17 GB. Built here, none of that crosses your link: Cloud
+# Build uploads only the source in .dockerignore's allowlist, pulls the weights
+# at Google's speed and pushes straight into Artifact Registry in the same
+# region. Built on the laptop, `docker push` would send ~6.6 GB upstream.
+#
+#   gcloud builds submit --region asia-southeast1 \
+#     --substitutions=_IMAGE=asia-southeast1-docker.pkg.dev/PROJECT/switchboard/switchboard:v1 .
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    env:
+      # The Dockerfile uses `--mount=type=cache` and a `# syntax=` directive.
+      # Both are BuildKit features, and the classic builder ignores them and
+      # then fails on the syntax line.
+      - DOCKER_BUILDKIT=1
+    args: ["build", "-t", "${_IMAGE}", "."]
+
+images:
+  - "${_IMAGE}"
+
+# The default is 10 minutes, which is not enough to install torch and download
+# 2.5 GB of weights. This is the single most common reason a first Cloud Build
+# of a model image fails.
+timeout: 3600s
+
+options:
+  machineType: E2_HIGHCPU_8
+  # The default disk holds the source, the layers and the final ~17 GB image.
+  diskSizeGb: 200
+  logging: CLOUD_LOGGING_ONLY

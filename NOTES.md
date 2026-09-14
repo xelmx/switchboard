@@ -457,3 +457,125 @@ seconds and the service never noticed.
 - 
 
 ---
+
+## Task 5 — the cloud, from code (Terraform + GKE Autopilot)
+
+**What it is.** Terraform is a file that describes infrastructure and a command
+that makes reality match it. `apply` creates what's missing, `destroy` removes
+what it created, and the difference between the file and the world is something
+you can read before agreeing to it. GKE Autopilot is Google's Kubernetes with
+the machines taken away: you declare pods with CPU and memory requests, and
+nodes appear and disappear underneath to fit them.
+
+**Why it's here.** Three reasons, and the third is the one that matters for a
+project paid for out of a trial credit.
+
+1. Everything from here on lives in the cloud, and the cloud is where "I
+   clicked something in a console six weeks ago" becomes unrecoverable.
+2. Task 3's first finding was that the cluster node had its own image store and
+   the image had to be hand-imported with `ctr`. A **registry** is the real
+   answer, and a registry is a thing that has to be created.
+3. **`terraform destroy` is the feature.** A cluster left running overnight
+   costs money whether or not anyone learns anything from it. Being able to
+   take the whole thing down in one command, and put it back in one command, is
+   what makes it affordable to work on this for five hours a week.
+
+**What goes wrong without it.** Console clicking produces infrastructure nobody
+can review, reproduce, or fully find again. The load balancer that survives a
+deleted cluster and bills quietly for months is the canonical version of this,
+and it is exactly the trap `scripts/destroy-task5.sh` is ordered to avoid.
+
+**What Terraform manages here — and what it deliberately doesn't:**
+
+- **Managed:** the four APIs the project needs switched on, the Artifact
+  Registry repository, and the Autopilot cluster. Three files, `apis.tf`,
+  `registry.tf`, `cluster.tf`.
+- **Not managed:** the Google account, the billing account, and the project
+  itself. Creating projects needs organisation-level permissions a personal
+  trial account doesn't cleanly have, and — more importantly — putting the
+  project inside the same state file means `terraform destroy` can delete the
+  thing the state is about. The project is an input; Terraform owns what's in
+  it.
+- **State is a local file.** A team keeps it in a GCS bucket so two people
+  can't apply at once. That bucket has to exist before Terraform runs, which is
+  the bootstrap problem every project meets once. For one person on one laptop,
+  local state is the honest answer.
+
+**Autopilot, not Standard.** Task 3's manifests already declare what a pod
+needs; that is the only input Autopilot wants. There is no node pool to size,
+no autoscaler to tune, and no idle node still running at midnight because
+nobody drained it. Two rules that come with it, both from Google's own docs:
+
+- **The bill follows `requests`, not `limits`.** On a cluster that supports
+  bursting a pod may use up to its limits while being billed for its requests;
+  on one that doesn't, Autopilot sets the limits down to the requests. Either
+  way requests are the number that costs money, which is why
+  `values-gke.yaml` sets requests and limits equal — Google's recommendation,
+  and it stops the pod's behaviour depending on a cluster feature you didn't
+  choose.
+- **CPU:memory must sit between 1:1 and 1:6.5** for the general-purpose
+  compute class. 2 vCPU to 4 GiB is 1:2.
+
+**Building the image in the cloud, not pushing it there.** The image is ~17 GB
+unpacked, ~6.6 GB compressed. Pushing that from a home connection in Manila is
+an afternoon. But task 2's Dockerfile *downloads* the weights during the build
+rather than copying them from disk — so Cloud Build can do the whole thing
+inside Google's network, pulling from HuggingFace at Google's speed and pushing
+into a registry in the same region. What leaves this house is the source in
+`.dockerignore`'s allowlist: a few hundred kilobytes. Two things had to be set
+for that to work at all:
+
+- **`timeout: 3600s`.** Cloud Build's default is ten minutes. Installing torch
+  and downloading 2.5 GB of weights is not a ten-minute job, and this is the
+  most common reason a first cloud build of a model image fails.
+- **`DOCKER_BUILDKIT=1`.** The Dockerfile opens with a `# syntax=` directive
+  and uses `--mount=type=cache`. The classic builder ignores the first and
+  fails on the second.
+
+`.dockerignore` also grew `terraform` — without it, `terraform.tfstate` would
+be uploaded into Cloud Build's source bucket, and state files hold more than
+you think.
+
+**Two switches that exist because of how they fail:**
+
+- **`deletion_protection = false` on the cluster.** The provider defaults it to
+  true and `terraform destroy` is then refused with an error that reads like a
+  bug in Terraform. This project is built to be torn down; the flag is off
+  deliberately, not by accident.
+- **Uninstall the Helm release *before* destroying the cluster.** The Service
+  of type `LoadBalancer` owns a Google forwarding rule that Terraform never
+  created and has no idea exists. Destroy the cluster first and that load
+  balancer is orphaned: still billing, invisible to `terraform destroy`,
+  findable only by going looking. `scripts/destroy-task5.sh` does it in the
+  order that avoids this, and prints the three `gcloud ... list` commands that
+  prove nothing is left.
+
+**What it costs (checked 2026-09-14).** A flat cluster management fee of
+**$0.10 per cluster per hour**, and a GKE free tier of **$74.40 of monthly
+credit per billing account** — enough for exactly one Autopilot cluster's
+management fee, and it covers *only* the management fee. Pods are billed on
+their requests, and the external load balancer is billed per hour plus traffic.
+The 90-day trial credit clock that task 0 mentioned starts the moment the first
+`apply` runs.
+
+**The proof:**
+
+```
+wsl -d Ubuntu-24.04 -- bash -lc 'cd /mnt/c/Users/lyle/Projects/xelmx/switchboard && CONFIRM=yes bash scripts/prove-task5.sh'
+```
+
+It refuses to run without `CONFIRM=yes`, because unlike every task before it
+this one spends money. It applies the Terraform, builds the image in Cloud
+Build, points `kubectl` at the cluster, installs **the same chart from task 4**
+with `values-gke.yaml`, waits for a real external address, runs the chart's own
+test against the cloud, and transcribes the probe clip over the public
+internet. Then it tells you, loudly, what is still running.
+
+**What it measured:** *pending — needs a Google account and
+`gcloud auth login`; nothing cloud-side exists yet.*
+
+**Explain-back** *(mine, after the task)*:
+
+- 
+
+---
