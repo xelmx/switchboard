@@ -8,11 +8,12 @@ metadata:
   labels:
     {{- include "switchboard.labels" . | nindent 4 }}
 spec:
-  {{- if not .Values.autoscaling.enabled }}
+  {{- if not (or .Values.autoscaling.enabled .Values.rollout.enabled) }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
-  # With autoscaling on, the replica count belongs to the autoscaler. Setting it
-  # here too would make every `helm upgrade` reset it - the two would fight.
+  # With autoscaling on, the replica count belongs to the autoscaler; with a
+  # Rollout, to Argo. Setting it here too would make every `helm upgrade` reset
+  # it - the two would fight.
   selector:
     matchLabels:
       {{- include "switchboard.selectorLabels" . | nindent 6 }}

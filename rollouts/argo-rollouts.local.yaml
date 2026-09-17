@@ -1,0 +1,22 @@
+# Argo Rollouts 1.10.0 (chart 2.43.1) on the laptop.
+#   helm upgrade --install argo-rollouts argo/argo-rollouts --version 2.43.1 \
+#     -n argo-rollouts --create-namespace -f rollouts/argo-rollouts.local.yaml
+controller:
+  replicas: 1
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+# Argo's own UI: every rollout, its steps, its analysis runs, and buttons to
+# promote or abort. On Docker Desktop a LoadBalancer is a stable localhost link:
+#   http://localhost:3100/rollouts/switchboard
+dashboard:
+  enabled: true
+  # Read-only: watching is the point here; promote/abort stay on the command line.
+  readonly: true
+  service:
+    type: LoadBalancer
+    port: 3100
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { memory: 256Mi }

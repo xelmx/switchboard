@@ -1,0 +1,19 @@
+# Task 8: canary rollouts on a laptop. Fake pods with the real model's timing.
+#
+#   helm upgrade --install switchboard chart/switchboard -n switchboard \
+#     -f chart/switchboard/values-rollout.yaml -f chart/switchboard/values-monitoring.yaml
+replicaCount: 4
+image:
+  tag: "0.2"
+model:
+  fake: true
+  fakeRtf: 0.185
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { cpu: "1", memory: 512Mi }
+probes:
+  startup:
+    periodSeconds: 2
+    failureThreshold: 15
+rollout:
+  enabled: true

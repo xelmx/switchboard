@@ -1,0 +1,51 @@
+{{- if .Values.rollout.enabled }}
+{{- if .Values.autoscaling.enabled }}
+{{- fail "rollout.enabled and autoscaling.enabled together are not supported by this chart (task 8 keeps them apart)" }}
+{{- end }}
+{{- $r := .Values.rollout }}
+# Argo Rollouts takes over the Deployment's pods. `workloadRef` means the
+# Deployment stays the single description of the pod - the Rollout only adds
+# *how* a new version replaces the old one. Once the first rollout is healthy
+# the Deployment itself is scaled to zero.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: {{ include "switchboard.fullname" . }}
+  labels:
+    {{- include "switchboard.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "switchboard.selectorLabels" . | nindent 6 }}
+  workloadRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "switchboard.fullname" . }}
+    scaleDown: {{ $r.deploymentScaleDown }}
+  strategy:
+    canary:
+      # No service mesh: the share of traffic a canary gets is its share of
+      # the pods behind the Service. One new pod beside four old ones is ~20%.
+      maxSurge: 1
+      maxUnavailable: 0
+      {{- if $r.analysis.enabled }}
+      # Judged continuously from the first step until the rollout completes.
+      # A failed measurement aborts the rollout and returns every pod to the
+      # stable version - no human in the loop.
+      analysis:
+        templates:
+          - templateName: {{ include "switchboard.fullname" . }}-canary
+        startingStep: 1
+        args:
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+          - name: stable-hash
+            valueFrom:
+              podTemplateHashValue: Stable
+      {{- end }}
+      steps:
+        {{- toYaml $r.steps | nindent 8 }}
+{{- end }}

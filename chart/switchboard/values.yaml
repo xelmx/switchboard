@@ -116,6 +116,29 @@ autoscaling:
     host: switchboard.local
     # How long the interceptor holds a request while the first pod starts.
     coldStartWait: 120s
+
+# Task 8. Needs Argo Rollouts installed. Mutually exclusive with autoscaling
+# in this chart.
+rollout:
+  enabled: false
+  # What happens to the original Deployment once the Rollout is healthy.
+  deploymentScaleDown: onsuccess
+  # Traffic share comes from pod counts (no mesh), so with 4 replicas the
+  # first step is one canary pod beside four stable ones.
+  steps:
+    - setWeight: 25
+    - pause: { duration: 90s }
+    - setWeight: 50
+    - pause: { duration: 60s }
+  analysis:
+    enabled: true
+    prometheusAddress: http://kps-kube-prometheus-stack-prometheus.monitoring.svc:9090
+    # The canary's p95 model time may be at most this multiple of stable's.
+    maxP95Ratio: 1.5
+    interval: 30s
+    # Give the canary a minute of traffic before judging it.
+    initialDelay: 60s
+    failureLimit: 1
 # The image `helm test` runs. Only needs curl.
 tests:
   image: curlimages/curl:8.11.1

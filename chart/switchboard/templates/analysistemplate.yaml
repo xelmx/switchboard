@@ -1,0 +1,50 @@
+{{- if and .Values.rollout.enabled .Values.rollout.analysis.enabled }}
+{{- $a := .Values.rollout.analysis }}
+{{- $job := include "switchboard.fullname" . }}
+# What "the new version is worse" means, as queries Argo runs against
+# Prometheus. Canary and stable pods are told apart by the pod-template hash
+# Argo stamps on each ReplicaSet; the ServiceMonitor copies it onto every
+# series as rollouts_pod_template_hash.
+#
+# Argo's own {{ "{{" }}args.x{{ "}}" }} placeholders are escaped so Helm leaves them alone.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ include "switchboard.fullname" . }}-canary
+  labels:
+    {{- include "switchboard.labels" . | nindent 4 }}
+spec:
+  args:
+    - name: canary-hash
+    - name: stable-hash
+  metrics:
+    # Relative, not absolute: the canary's model time against the stable
+    # version's, measured over the same minute on the same machine. A slower
+    # laptop moves both; only a slower *version* moves the ratio. Model time
+    # (inference), not end to end - queueing depends on which pod the
+    # Service happened to pick, and that is not the version's fault.
+    - name: inference-p95-vs-stable
+      interval: {{ $a.interval }}
+      initialDelay: {{ $a.initialDelay }}
+      failureLimit: {{ $a.failureLimit }}
+      successCondition: result[0] <= {{ $a.maxP95Ratio }}
+      provider:
+        prometheus:
+          address: {{ $a.prometheusAddress }}
+          query: |
+            histogram_quantile(0.95, sum by (le) (rate(switchboard_inference_seconds_bucket{job="{{ $job }}",rollouts_pod_template_hash="{{ "{{" }}args.canary-hash{{ "}}" }}"}[1m])))
+            /
+            histogram_quantile(0.95, sum by (le) (rate(switchboard_inference_seconds_bucket{job="{{ $job }}",rollouts_pod_template_hash="{{ "{{" }}args.stable-hash{{ "}}" }}"}[1m])))
+    # Any request the canary fails is a failure. `or vector(0)`: no errors at
+    # all means no series, which must read as zero, not as "no data".
+    - name: canary-errors
+      interval: {{ $a.interval }}
+      initialDelay: {{ $a.initialDelay }}
+      failureLimit: 0
+      successCondition: result[0] == 0
+      provider:
+        prometheus:
+          address: {{ $a.prometheusAddress }}
+          query: |
+            sum(increase(switchboard_requests_total{job="{{ $job }}",outcome="error",rollouts_pod_template_hash="{{ "{{" }}args.canary-hash{{ "}}" }}"}[2m])) or vector(0)
+{{- end }}

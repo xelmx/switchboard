@@ -13,6 +13,10 @@ spec:
   selector:
     matchLabels:
       {{- include "switchboard.selectorLabels" . | nindent 6 }}
+  # Argo Rollouts stamps each version's pods with rollouts-pod-template-hash;
+  # copying it onto every series is how the canary analysis tells versions apart.
+  podTargetLabels:
+    - rollouts-pod-template-hash
   endpoints:
     - port: http
       path: /metrics

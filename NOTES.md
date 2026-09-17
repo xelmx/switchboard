@@ -949,3 +949,119 @@ traffic.
 - 
 
 ---
+
+## Task 8 — canary (Argo Rollouts)
+
+**What it is.** A Deployment replaces old pods with new ones as fast as the new
+ones pass their readiness probe — and a readiness probe only asks "is it up?",
+not "is it any good?". Argo Rollouts replaces the *how*: a new version first
+gets a small share of the traffic (the **canary**), stays there for a while,
+is **measured against the version it would replace**, and is either promoted
+step by step or thrown out automatically. The measuring is an
+`AnalysisTemplate`: queries Argo runs against Prometheus on a schedule, each
+with a success condition.
+
+**Why it's here.** This project exists because of one question: *is this model
+good enough on phone calls?* dialtone answered it offline. A canary answers the
+production half — *is the new version at least as good as the old one, on real
+traffic, right now?* — and stops a bad answer from reaching everybody. Tasks
+6 and 7 supplied the ingredients: the metrics, and the knowledge of which ones
+move when something is wrong.
+
+**What goes wrong without it.** Task 4 proved a rolling update can replace every
+pod without dropping a request. It will replace every pod with a *worse* model
+just as smoothly. A model that got three times slower — a dtype mistake, a CPU
+fallback, a bigger checkpoint — passes every readiness probe there is.
+
+**How it's wired.**
+
+- **`workloadRef`, not a rewritten Deployment.** The Rollout points at the
+  chart's existing Deployment, which stays the single description of the pod;
+  the Rollout only adds the strategy. Once the first rollout is healthy, Argo
+  scales the Deployment itself to zero. A `helm upgrade` still changes the
+  Deployment — and Argo reacts to that.
+- **No service mesh, so traffic follows pod counts.** With four replicas, the
+  first step is one canary pod next to four stable ones: about a fifth of the
+  requests. A mesh (or Gateway API) could split by percentage exactly; this is
+  the honest version without one.
+- **Canary and stable told apart by a label.** Argo stamps every pod with its
+  ReplicaSet's `rollouts-pod-template-hash`; the ServiceMonitor now copies that
+  onto every series (`podTargetLabels`), and the analysis is passed the two
+  hashes as arguments.
+- **The judgement is relative.** Canary p95 *model time* divided by stable p95
+  model time, over the same minute on the same machine, must stay at or below
+  1.5 — plus zero canary errors. Relative, because a busy laptop slows both
+  versions and only a worse *version* moves the ratio. Model time rather than
+  end to end, because task 7 showed end-to-end latency depends on which pod the
+  Service happened to pick, and that is not the new version's fault.
+- **Autoscaling is off in this mode.** KEDA can scale a Rollout, but two
+  controllers deciding pod counts while a third splits traffic by pod count is
+  a lesson for another day; the chart refuses the combination.
+
+**The dashboard.** Argo's own UI shows each rollout, its steps, its analysis
+runs and every measurement: **http://localhost:3100/rollouts/switchboard**
+(read-only; promote and abort stay on the command line,
+`kubectl argo rollouts ...`).
+
+**The proof:**
+
+```
+wsl -d Ubuntu-24.04 -- bash -lc 'cd /mnt/c/Users/lyle/Projects/xelmx/switchboard && bash scripts/prove-task8.sh'
+```
+
+Free, local. Four fake pods with the real model's timing. It rolls out a good
+new version under load, then a bad one — the same pods with `FAKE_RTF` raised
+from 0.185 to 0.6, a model that got about three times slower — and records
+what Argo did with each, how many requests failed, and what Helm believed
+meanwhile.
+
+**What it measured (2026-09-17, 4 fake pods at the real model's timing, 4 callers):**
+
+| | good version (v2) | bad version (v3, model ~3× slower) |
+|---|---:|---:|
+| what Argo did | promoted through 25 % → 50 % → 100 % | **aborted at the first step** |
+| time from `helm upgrade` | 169 s | 94 s |
+| canary p95 model time ÷ stable's | 1.0 | **3.32** (limit 1.5) |
+| canary errors | 0 | 0 |
+| requests during the rollout / failed | 382 / 0 | 177 / **0** |
+| pods afterwards | 4 × v2 | 4 × v2 |
+| Helm's status for the release | deployed | **deployed** |
+| `helm rollback` to v2 | — | healthy in 0 s |
+
+The bad version reached one pod out of five — about a fifth of the traffic —
+for about a minute and a half, and never a failed request: it was slow, not
+broken. The first judgement came at 60 s, the second failure at 90 s, and
+`failureLimit: 1` means the second one aborts. The measured ratio, 3.32, is
+close to the real one (0.6 ÷ 0.185 = 3.24); the good version's exact 1.0 is
+both p95s falling in the same histogram bucket (task 6's lesson again — fine
+for a 1.5× threshold, useless for a 1.05× one).
+
+**The finding: after an abort, Helm and the cluster disagree.** Helm recorded
+revision 3 — the slow model — as `deployed`. The cluster was running v2
+everywhere, with the Rollout marked `Degraded`. Anything that trusts Helm's
+status — a CI job, a dashboard, the next engineer — would believe the slow
+model shipped. And the next `helm upgrade` would carry the bad settings
+forward. `helm rollback` closes the gap: Helm goes back to v2's values, the
+Deployment's pod template matches the stable ReplicaSet again, and Argo clears
+the abort without creating a single pod — "healthy in 0 s". An automated
+abort is not finished until the source of truth has been rolled back too; in a
+GitOps setup that means a revert commit, which is why Argo is usually paired
+with Argo CD.
+
+**Two things learned the hard way:**
+
+1. **With `workloadRef`, `helm upgrade` changes the Deployment, not the
+   Rollout** — so for a moment after the upgrade the Rollout still reports
+   `Healthy`, for the version it is about to replace. A script that waits for
+   "Healthy" returns immediately. The proof first waits for Argo's
+   `currentPodHash` to differ from the stable one.
+2. **After an abort the Rollout *starts* `Degraded`,** so "wait until Healthy
+   or Degraded" ends at once after `helm rollback`. That wait has to be for
+   Healthy only.
+
+
+**Explain-back** *(mine, after the task)*:
+
+- 
+
+---
