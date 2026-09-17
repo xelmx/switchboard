@@ -11,6 +11,18 @@ Cloud (GKE Autopilot), then the same deployment on Azure (AKS).
 
 Work in progress. `NOTES.md` is the running log, one entry per tool.
 
+## Try it
+
+```
+bash scripts/up-local.sh         # the whole local platform, free
+bash scripts/check-platform.sh   # 24 health checks, PASS/FAIL
+bash scripts/down-local.sh       # give the memory back
+```
+
+**[WALKTHROUGH.md](WALKTHROUGH.md)** takes a new user through it step by step:
+what each piece is, where to look, what to check on the dashboard, and how to
+make the service busy and watch it scale.
+
 ## Status
 
 | # | task | tool | state |

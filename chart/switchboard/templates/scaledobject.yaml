@@ -20,9 +20,12 @@ spec:
     name: {{ include "switchboard.fullname" . }}
   minReplicaCount: {{ $a.minReplicas }}
   maxReplicaCount: {{ $a.maxReplicas }}
+  {{- if eq (int $a.minReplicas) 0 }}
+  # Only matter when scaling to zero (the HPA handles N -> 1); KEDA warns if
+  # they are set otherwise.
   pollingInterval: {{ $a.pollingInterval }}
-  # Only used for the last step, 1 -> 0 (the HPA handles N -> 1).
   cooldownPeriod: {{ $a.scaleDownWindowSeconds }}
+  {{- end }}
   advanced:
     horizontalPodAutoscalerConfig:
       behavior:
