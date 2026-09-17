@@ -70,6 +70,25 @@ nodeSelector: {}     # task 9 puts the GPU node selector here
 tolerations: []
 affinity: {}
 
+
+# Task 6. Everything here needs the Prometheus Operator's CRDs
+# (ServiceMonitor, PrometheusRule) - i.e. kube-prometheus-stack installed
+# first. Off by default so the chart still installs on a bare cluster.
+metrics:
+  serviceMonitor:
+    enabled: false
+    interval: 15s
+  # Alerting rules. Thresholds are for the CPU laptop profile; a GPU pod would
+  # tighten them (task 9).
+  alerts:
+    enabled: false
+    p95Seconds: 4        # end-to-end p95 above this, sustained -> SwitchboardSlow
+    queueDepth: 2        # requests waiting for the model, sustained -> SwitchboardBacklog
+    errorRatio: 0.05     # share of requests failing -> SwitchboardErrors
+    for: 1m
+  # A Grafana dashboard, shipped as a ConfigMap the Grafana sidecar picks up.
+  dashboard:
+    enabled: false
 # The image `helm test` runs. Only needs curl.
 tests:
   image: curlimages/curl:8.11.1

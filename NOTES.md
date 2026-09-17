@@ -644,3 +644,158 @@ the requests-equal-limits decision, visible in a number.
 - 
 
 ---
+
+## Task 6 — seeing it (Prometheus + Grafana)
+
+**What it is.** Prometheus is a database of numbers over time that fetches
+them itself: every 15 seconds it asks each target for `/metrics` and stores
+what it gets. It then evaluates rules against that history — "p95 latency above
+4 s for a minute" — and hands anything that trips to **Alertmanager**, whose job
+is deciding who hears about it. **Grafana** draws the history. The
+**Prometheus Operator** is what makes all of this Kubernetes-shaped: instead of
+editing `prometheus.yml`, you create `ServiceMonitor` and `PrometheusRule`
+objects, and the operator writes the configuration.
+`kube-prometheus-stack` installs the whole set in one Helm release, plus
+kube-state-metrics (what Kubernetes believes: replicas, restarts, requests) and
+node-exporter (what the machine believes: CPU, memory).
+
+**Why it's here.** Task 1 made the service *report* on itself — a latency
+histogram, queue depth, a readiness gauge. Nobody was reading it. Task 7 scales
+on one of those numbers and task 8 decides whether a new model version is safe
+by comparing them; both are built on Prometheus. And a load test (task 9) is
+only a table of numbers until something recorded what the service was doing
+while it ran.
+
+**What goes wrong without it.** You find out the service is slow from the
+people using it. And "slow" can't be fixed without knowing *where* the time
+went: in the model, or waiting in line for it. Those two have opposite fixes —
+a faster model, or more copies of the same one — and only the histograms tell
+them apart.
+
+**The service's monitoring ships with the service.** Three templates, off by
+default so the chart still installs on a bare cluster
+(`values-monitoring.yaml` turns them on):
+
+- **`servicemonitor.yaml`** — "scrape `/metrics` on every pod behind this
+  Service." Replicas come and go and are picked up without anyone touching
+  Prometheus.
+- **`prometheusrule.yaml`** — five recording rules (p50/p95/p99, request rate
+  by outcome, real-time factor) and five alerts: `SwitchboardDown`,
+  `SwitchboardNoReadyReplicas`, `SwitchboardSlow`, `SwitchboardBacklog`,
+  `SwitchboardErrors`. Thresholds are chart values.
+- **`dashboard.yaml`** — the Grafana dashboard as a ConfigMap labelled
+  `grafana_dashboard: "1"`; Grafana's sidecar loads it. The dashboard is in git,
+  versioned with the code it describes, not trapped in a Grafana database.
+
+**Three decisions in the numbers:**
+
+- **Percentiles from buckets summed across pods.** `histogram_quantile` over
+  `sum by (le)`, never an average of per-pod percentiles — that would weight an
+  idle pod the same as a busy one, and percentiles don't average anyway.
+- **"Where the time goes" is the panel that matters.** End-to-end p95 next to
+  inference p95 and queue-wait p95. Inference flat while waiting climbs means
+  the model is fine and there aren't enough copies of it. That is task 7's
+  signal, and `switchboard_queue_depth` is the number it will scale on.
+- **Real-time factor** — model seconds per second of audio — is the one number
+  that compares a CPU pod, a GPU pod and dialtone's bench on the same scale.
+
+**One setting that silently breaks everything.** By default the operator only
+reads ServiceMonitors and rules that carry *its own release's* labels. The
+switchboard chart is a different release, so without
+`serviceMonitorSelectorNilUsesHelmValues: false` (and the three siblings for
+pods, probes and rules) Prometheus ignores it completely — no error, just no
+target. It is the most common "why is my service missing" of this stack.
+
+**Where to look.** Grafana is at **http://localhost:3000/d/switchboard** for as
+long as the local cluster runs (anonymous view; `admin` / `switchboard` to
+edit). Explore runs ad-hoc Prometheus queries; Alerting lists the rules.
+
+**Laptop trimming.** Docker Desktop runs its control plane inside one container
+and doesn't expose etcd, the scheduler, the controller manager or kube-proxy to
+scraping. Left on, the stack shows four permanently-down targets and fires
+alerts about a control plane that is fine; they're switched off in
+`monitoring/kube-prometheus-stack.local.yaml`, which also caps every component's
+memory. Grafana allows anonymous viewing — local only.
+
+**The proof:**
+
+```
+wsl -d Ubuntu-24.04 -- bash -lc 'cd /mnt/c/Users/lyle/Projects/xelmx/switchboard && bash scripts/prove-task6.sh'
+```
+
+Free: local cluster only, and it pins `kubectl` to `docker-desktop` first,
+because after task 5 the current context was still a GKE cluster. It installs
+the stack, installs switchboard with the real weights and monitoring switched
+on, checks Prometheus found the service **without any Prometheus configuration
+being edited**, then runs a quiet baseline (one caller) and a deliberate
+overload (four callers against one replica). The overload should make
+`SwitchboardSlow` and `SwitchboardBacklog` fire and reach Alertmanager; removing
+it should make them resolve on their own.
+
+**What it measured (2026-09-17, real weights, 1 replica, CPU fp32, 4-core limit):**
+
+| check | result |
+|---|---:|
+| monitoring stack ready (images already cached; 127 s the first time) | 25 s |
+| switchboard found and scraped — no Prometheus config touched | up after 75 s |
+| recording + alerting rules loaded from the chart | 10 |
+| dashboard provisioned from the chart | yes |
+
+| | baseline, 1 caller | overload, 4 callers |
+|---|---:|---:|
+| requests / s | 0.80 | **0.75** |
+| p95 end to end | 1.60 s | **10.17 s** |
+| p95 inference / p95 waiting for the model | — | 4.13 s / 5.00 s |
+| most requests queued | 0 | 3 |
+| real-time factor | 0.185 | — |
+| pod CPU (limit 4) | — | 3.97 cores |
+
+| alerting | result |
+|---|---:|
+| fired under overload | `SwitchboardBacklog`, `SwitchboardSlow` |
+| first alert after the overload began | 81 s |
+| reached Alertmanager | both |
+| all cleared after the load stopped | 81 s |
+
+**The row that matters is requests per second.** Four times the callers bought
+*no* extra throughput — 0.80 became 0.75 — and p95 went from 1.6 s to 10.2 s.
+One replica holding one model lock can only do one thing at a time; the extra
+callers just stand in line. The dashboard says it in one panel: waiting-for-
+the-model climbs while throughput stays flat. That is the case for task 7, in
+the service's own numbers.
+
+**Inference also got slower (1.6 → 4.1 s at p95),** which the lock alone
+doesn't explain. The pod sat at 3.97 of its 4 cores: the queued requests'
+uploads and audio decoding compete for the same CPU as the model. More copies
+would fix that too; a bigger single copy would not fix the queue.
+
+**Four things learned the hard way:**
+
+1. **`helm --wait` finished before Prometheus existed.** The chart creates a
+   `Prometheus` *object*; the operator creates its pod afterwards, when Helm has
+   already declared success. The first run opened a port-forward to a pod that
+   wasn't there yet — port-forward exits immediately when that happens — and
+   then waited five minutes for a target it could never see. The script now
+   waits for the operator's pods by label. Anything installed through an
+   operator has this gap.
+2. **A percentile is only as precise as its buckets.** "waiting p95 = 5.00 s" is
+   not a measurement of five seconds — 5 is a bucket boundary, and
+   `histogram_quantile` interpolates linearly inside a bucket. The overload's
+   10.17 s sits somewhere in the 8–13 s bucket. Good enough to alert on; not good
+   enough to quote to a decimal. Task 9's load test measures latency on the
+   client side, where each request is timed exactly.
+3. **`ctr images ls | grep -q` under `pipefail` fails at random.** grep exits at
+   its first match, `ctr` is killed by SIGPIPE mid-listing, and pipefail
+   reports the whole check as failed. The image was there; the check said it
+   wasn't. Captured into a variable first, in tasks 4 and 6.
+4. **Only one LoadBalancer can own a port.** Prometheus and Alertmanager
+   Services both carry a config-reloader port 8080, so on Docker Desktop only
+   Grafana gets a stable `localhost:3000`; the other two are port-forwarded
+   by the script when needed.
+
+
+**Explain-back** *(mine, after the task)*:
+
+- 
+
+---

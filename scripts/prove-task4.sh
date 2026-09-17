@@ -35,7 +35,7 @@ echo "=== 0a. is the image inside the cluster node? ==="
 # Task 3's first finding: the node has its own image store, separate from the
 # Docker daemon that built the image. This is what a registry solves (task 5).
 NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
-if docker exec "$NODE" ctr -n k8s.io images ls 2>/dev/null | grep -q "docker.io/library/${IMAGE}"; then
+if grep -q "docker.io/library/${IMAGE}" <<<"$(docker exec "$NODE" ctr -n k8s.io images ls 2>/dev/null)"; then
   echo "$IMAGE already in node $NODE"
 else
   echo "$IMAGE not in node $NODE - importing (6.6 GB, ~2-3 min)..."

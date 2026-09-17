@@ -1,0 +1,17 @@
+{{- if .Values.metrics.dashboard.enabled }}
+# Grafana's sidecar watches for ConfigMaps labelled grafana_dashboard=1 and
+# loads them. The dashboard ships with the service, versioned with it, instead
+# of living only inside a Grafana database someone clicked together.
+# The JSON is read raw (.Files.Get is not templated), so its own legend
+# placeholders survive; the three __TOKENS__ are filled in here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "switchboard.fullname" . }}-dashboard
+  labels:
+    {{- include "switchboard.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  switchboard.json: |-
+{{ .Files.Get "dashboards/switchboard.json" | replace "__JOB__" (include "switchboard.fullname" .) | replace "__NAMESPACE__" .Release.Namespace | replace "__CONTAINER__" .Chart.Name | indent 4 }}
+{{- end }}

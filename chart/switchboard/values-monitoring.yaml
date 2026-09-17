@@ -1,0 +1,12 @@
+# Task 6: layer on top of any other values file once kube-prometheus-stack
+# is installed.
+#
+#   helm upgrade --install switchboard chart/switchboard -n switchboard \
+#     --create-namespace -f chart/switchboard/values-monitoring.yaml
+metrics:
+  serviceMonitor:
+    enabled: true
+  alerts:
+    enabled: true
+  dashboard:
+    enabled: true

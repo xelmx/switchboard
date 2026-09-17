@@ -1,0 +1,78 @@
+# kube-prometheus-stack on Docker Desktop, sized for a laptop that is also
+# running a work stack. Chart 91.4.1 (Prometheus Operator v0.94.0).
+#
+#   helm upgrade --install kps prometheus-community/kube-prometheus-stack \
+#     --version 91.4.1 -n monitoring --create-namespace \
+#     -f monitoring/kube-prometheus-stack.local.yaml
+#
+# What the chart installs: the Prometheus Operator (turns ServiceMonitor and
+# PrometheusRule objects into Prometheus config), Prometheus, Alertmanager,
+# Grafana, kube-state-metrics (what Kubernetes thinks: replicas, restarts) and
+# node-exporter (what the machine thinks: CPU, memory).
+
+prometheus:
+  prometheusSpec:
+    # By default the operator only picks up ServiceMonitors and rules carrying
+    # *this release's* labels. Our chart is a different release, so without
+    # these four lines Prometheus silently ignores everything switchboard
+    # ships. The most common "why is my target missing" of this stack.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    retention: 2d
+    # 15 s is what the dashboards and alert windows are built around.
+    scrapeInterval: 15s
+    evaluationInterval: 15s
+    resources:
+      requests: { cpu: 200m, memory: 512Mi }
+      limits: { memory: 1Gi }
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: { cpu: 20m, memory: 64Mi }
+      limits: { memory: 128Mi }
+
+grafana:
+  service:
+    type: LoadBalancer
+    port: 3000
+  # Local only. Never do this on anything reachable from outside.
+  adminPassword: switchboard
+  grafana.ini:
+    auth.anonymous:
+      enabled: true
+      org_role: Viewer
+  resources:
+    requests: { cpu: 50m, memory: 256Mi }
+    limits: { memory: 512Mi }
+
+# Docker Desktop runs the control plane inside one container and does not
+# expose these components to scraping. Left on, they appear as permanently
+# "down" targets and fire alerts about a control plane that is fine.
+kubeEtcd: { enabled: false }
+kubeControllerManager: { enabled: false }
+kubeScheduler: { enabled: false }
+kubeProxy: { enabled: false }
+
+defaultRules:
+  rules:
+    etcd: false
+    kubeControllerManager: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+    kubeProxy: false
+
+prometheusOperator:
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+# Grafana gets a stable local address: Docker Desktop maps a LoadBalancer
+# Service to localhost, the same way switchboard is on :8000.
+#   http://localhost:3000   (anonymous view; admin / switchboard to edit)
+# Prometheus and Alertmanager stay ClusterIP: both Services also carry a
+# config-reloader port 8080, and two LoadBalancers cannot both own
+# localhost:8080. Grafana's Explore and Alerting pages cover them; for the
+# raw UIs:  kubectl -n monitoring port-forward svc/kps-kube-prometheus-stack-prometheus 9090

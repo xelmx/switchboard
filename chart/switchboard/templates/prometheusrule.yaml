@@ -1,0 +1,65 @@
+{{- if .Values.metrics.alerts.enabled }}
+{{- $job := include "switchboard.fullname" . }}
+{{- $a := .Values.metrics.alerts }}
+# What "the service is unhealthy" means, written down where Prometheus can
+# evaluate it every 15 s. Recording rules first (named results the dashboard
+# and the alerts share), then the alerts themselves.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "switchboard.fullname" . }}
+  labels:
+    {{- include "switchboard.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: switchboard.recording
+      rules:
+        # Percentiles are computed from histogram buckets summed across pods -
+        # never averaged per pod, which would weight an idle pod like a busy one.
+        {{- range $q := list "0.5" "0.95" "0.99" }}
+        - record: switchboard:request_seconds:p{{ mulf $q 100 | int }}_1m
+          expr: histogram_quantile({{ $q }}, sum by (le) (rate(switchboard_request_seconds_bucket{job="{{ $job }}"}[1m])))
+        {{- end }}
+        - record: switchboard:requests:rate1m
+          expr: sum by (outcome) (rate(switchboard_requests_total{job="{{ $job }}"}[1m]))
+        # Seconds of model time per second of audio. Below 1 = faster than real time.
+        - record: switchboard:real_time_factor:1m
+          expr: sum(rate(switchboard_inference_seconds_sum{job="{{ $job }}"}[1m])) / sum(rate(switchboard_audio_seconds_total{job="{{ $job }}"}[1m]))
+
+    - name: switchboard.alerts
+      rules:
+        - alert: SwitchboardDown
+          # Not "unready for a moment" - scraping itself failing, on every pod.
+          expr: sum(up{job="{{ $job }}"}) == 0
+          for: {{ $a.for }}
+          labels: { severity: critical }
+          annotations:
+            summary: No switchboard pod is answering /metrics.
+        - alert: SwitchboardNoReadyReplicas
+          expr: sum(switchboard_ready{job="{{ $job }}"}) == 0
+          for: {{ $a.for }}
+          labels: { severity: critical }
+          annotations:
+            summary: Pods are up but no model is loaded - nothing can take traffic.
+        - alert: SwitchboardSlow
+          expr: switchboard:request_seconds:p95_1m > {{ $a.p95Seconds }}
+          for: {{ $a.for }}
+          labels: { severity: warning }
+          annotations:
+            summary: "p95 latency {{ "{{" }} $value | humanizeDuration {{ "}}" }} is above {{ $a.p95Seconds }}s."
+        - alert: SwitchboardBacklog
+          # The number task 7 will scale on: requests waiting for the model.
+          expr: sum(switchboard_queue_depth{job="{{ $job }}"}) > {{ $a.queueDepth }}
+          for: {{ $a.for }}
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ "{{" }} $value {{ "}}" }} requests are queued for the model - more replicas needed."
+        - alert: SwitchboardErrors
+          expr: |
+            sum(rate(switchboard_requests_total{job="{{ $job }}",outcome="error"}[5m]))
+              / sum(rate(switchboard_requests_total{job="{{ $job }}"}[5m])) > {{ $a.errorRatio }}
+          for: {{ $a.for }}
+          labels: { severity: critical }
+          annotations:
+            summary: "{{ "{{" }} $value | humanizePercentage {{ "}}" }} of requests are failing."
+{{- end }}

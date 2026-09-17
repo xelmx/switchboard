@@ -1,0 +1,20 @@
+{{- if .Values.metrics.serviceMonitor.enabled }}
+# "Scrape /metrics on every pod behind this Service, every 15 s."
+# The Prometheus Operator turns this into Prometheus configuration; nobody edits
+# prometheus.yml by hand. Pods come and go - the ServiceMonitor follows the
+# Service's endpoints, so new replicas are scraped without anyone noticing.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "switchboard.fullname" . }}
+  labels:
+    {{- include "switchboard.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "switchboard.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+{{- end }}
