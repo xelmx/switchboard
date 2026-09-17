@@ -19,3 +19,19 @@ resource "google_project_iam_member" "cloudbuild_default" {
   role    = "roles/cloudbuild.builds.builder"
   member  = "serviceAccount:${data.google_project.this.number}-compute@developer.gserviceaccount.com"
 }
+
+# The same account is also what GKE Autopilot nodes run as. In an organisation
+# created after 2024 the policy iam.automaticIamGrantsForDefaultServiceAccounts
+# is enforced, so it no longer gets Editor automatically - and a node with no
+# roles cannot pull the image from Artifact Registry (ImagePullBackOff, 403) or
+# send its logs and metrics. These are the two grants GKE's docs call for.
+resource "google_project_iam_member" "node_default" {
+  for_each = toset([
+    "roles/container.defaultNodeServiceAccount", # logs, metrics, node reporting
+    "roles/artifactregistry.reader",             # pull the image
+  ])
+
+  project = var.project_id
+  role    = each.key
+  member  = "serviceAccount:${data.google_project.this.number}-compute@developer.gserviceaccount.com"
+}
