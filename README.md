@@ -24,6 +24,23 @@ Work in progress. `NOTES.md` is the running log, one entry per tool.
 | 6 | seeing it | Prometheus + Grafana | |
 | 7 | scaling | KEDA | |
 | 8 | canary | Argo Rollouts | |
-| 9 | the GPU + the numbers | L4 pod, DCGM, k6 | |
+| 9 | the GPU + the numbers | local RTX 4060 (the GCP trial allows no GPUs), DCGM, k6 | |
 | 10 | Azure appendix | Terraform azurerm + AKS | |
 | 11 | tear down + write-up | | |
+
+## Cost discipline
+
+The cloud tasks run on a Google Cloud **free trial** ($300, 90 days), which is
+never upgraded to a paid account: a trial cannot bill the card on file, and
+when its credit or time runs out, resources are stopped rather than charged.
+The trial allows no GPUs, so task 9 runs on a local RTX 4060.
+
+Every cloud session ends the same way:
+
+```
+bash scripts/destroy-task5.sh   # release first (frees the load balancer), then the cluster
+bash scripts/cloud-check.sh     # must print NOTHING RUNNING
+```
+
+The registry and its image stay between sessions (cents per month); the
+cluster, which bills by the hour, does not.

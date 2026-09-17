@@ -7,6 +7,10 @@
 # There is no node pool to size, no autoscaler to tune, and no idle node left
 # running overnight because nobody drained it.
 resource "google_container_cluster" "switchboard" {
+  # Zero or one. Turning the cluster off between sessions is an `apply`, not a
+  # `destroy`: the registry and the 17 GB image it holds stay put.
+  count = var.cluster_enabled ? 1 : 0
+
   name     = var.cluster_name
   location = var.region
 

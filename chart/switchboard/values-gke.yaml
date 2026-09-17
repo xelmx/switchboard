@@ -15,7 +15,10 @@ image:
   tag: v1
   pullPolicy: IfNotPresent
 
-replicaCount: 2
+# One copy on the trial: it halves the bill and stays well inside the
+# trial's CPU quota, which cannot be raised. The rolling update still works -
+# maxSurge: 1 brings the new pod up before the old one goes.
+replicaCount: 1
 
 model:
   device: cpu   # task 9 switches this to cuda on an L4 node

@@ -566,6 +566,21 @@ their requests, and the external load balancer is billed per hour plus traffic.
 The 90-day trial credit clock that task 0 mentioned starts the moment the first
 `apply` runs.
 
+**Sessions, not a standing cluster.** The cluster is switchable:
+`cluster_enabled = false` removes it with an `apply` and leaves the registry and
+its 17 GB image alone, so the next session doesn't pay for another Cloud Build.
+`scripts/destroy-task5.sh` does exactly that after uninstalling the release;
+`ALL=1` destroys everything. `scripts/cloud-check.sh` lists every resource type
+this project can leave billing by the hour and exits non-zero if any exist —
+a session isn't over until it prints `NOTHING RUNNING`. On the trial, GKE runs
+one replica: half the bill, and well inside a CPU quota the trial won't raise.
+
+**The trial's rules (Google's docs, checked 2026-09-17).** The card on file is
+not charged during the trial; a verification hold of up to $1 is released.
+When the credit or the 90 days run out, resources are stopped and later deleted
+— nothing is charged unless the account is manually upgraded. GPUs are not
+allowed, which moves task 9 onto the local RTX 4060.
+
 **The proof:**
 
 ```

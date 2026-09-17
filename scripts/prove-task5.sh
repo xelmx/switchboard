@@ -7,8 +7,9 @@
 #
 #   CONFIRM=yes bash scripts/prove-task5.sh
 #
-# Tear it all down with:
-#   bash scripts/destroy-task5.sh
+# End the session with:
+#   bash scripts/destroy-task5.sh          # cluster off, image kept
+#   ALL=1 bash scripts/destroy-task5.sh    # everything, at the end of the project
 #
 # What it shows, in order:
 #   1. an empty project becomes a cluster and a registry, from files (apply)
@@ -131,8 +132,8 @@ echo "=== wrote results/task5-gke.md ==="
 cat <<WARN
 
   ----------------------------------------------------------------
-  STILL RUNNING AND STILL BILLING: a GKE Autopilot cluster, two
-  pods at 2 vCPU / 4 GiB each, and an external load balancer.
+  STILL RUNNING AND STILL BILLING: a GKE Autopilot cluster, one
+  pod at 2 vCPU / 4 GiB, and an external load balancer.
 
       bash scripts/destroy-task5.sh
 

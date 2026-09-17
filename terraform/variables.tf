@@ -19,3 +19,9 @@ variable "repo_name" {
   type        = string
   default     = "switchboard"
 }
+
+variable "cluster_enabled" {
+  description = "false removes the cluster (the part that bills by the hour) and keeps the registry and its image (cents per month). End every session with it off; see scripts/destroy-task5.sh."
+  type        = bool
+  default     = true
+}
