@@ -17,6 +17,10 @@ spec:
   containers:
     - name: curl
       image: {{ .Values.tests.image }}
+      # Explicit, so GKE Autopilot does not have to invent them (it warns when it does).
+      resources:
+        requests: { cpu: 250m, memory: 512Mi }
+        limits: { cpu: 250m, memory: 512Mi }
       command: ["/bin/sh", "-c"]
       args:
         - |

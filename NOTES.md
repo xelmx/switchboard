@@ -594,8 +594,50 @@ with `values-gke.yaml`, waits for a real external address, runs the chart's own
 test against the cloud, and transcribes the probe clip over the public
 internet. Then it tells you, loudly, what is still running.
 
-**What it measured:** *pending — needs a Google account and
-`gcloud auth login`; nothing cloud-side exists yet.*
+**What it measured (2026-09-17, `asia-southeast1`, one replica, CPU):**
+
+| check | result |
+|---|---:|
+| `terraform apply` — APIs, registry, cluster, IAM from an empty project | 431 s |
+| image built in Cloud Build (none of the 6.6 GB crossed the home link) | 1052 s |
+| nodes declared anywhere in the repo | 0 |
+| what Autopilot provisioned for the pod | one `ek-standard-8` node |
+| `helm install --wait` to ready, incl. node + image pull | 217 s |
+| `helm test` against the cloud release | pass |
+| transcript of the probe clip over the public internet | correct, word for word |
+| inference, 6.6 s of audio, 2 vCPU fp32 | 3483 ms |
+| end of session: release out, cluster off | 4 m 45 s for the cluster |
+| `cloud-check.sh` afterwards | **NOTHING RUNNING**; registry kept (6.1 GB) |
+
+3.5 s here against 1.6 s on the laptop is not the cloud being slow: the laptop
+pod could burst to four cores, this one is held to the two it pays for. It is
+the requests-equal-limits decision, visible in a number.
+
+**Five things learned the hard way:**
+
+1. **A new organisation is locked down by default, and it lands on GKE.**
+   `iam.automaticIamGrantsForDefaultServiceAccounts` is enforced, so the
+   Compute default service account — the identity Autopilot nodes run as —
+   has no roles at all. Found by reading the effective policies *before* the
+   first apply; without `roles/artifactregistry.reader` the pod would have sat
+   in `ImagePullBackOff` with a 403 and no mention of IAM. `build_iam.tf`
+   grants it and `roles/container.defaultNodeServiceAccount`.
+2. **A budget on a trial account measures the wrong thing by default.** Budgets
+   compare against cost *after* credits, which on a trial is always $0 — the
+   alert would never fire. `--credit-types-treatment=exclude-all-credits` makes
+   it watch real usage.
+3. **Consent is per-scope now.** `gcloud auth application-default login` failed
+   the first time with "cloud-platform scope is required but not consented":
+   Google's consent page lists permissions as checkboxes, and the one Terraform
+   needs was left unticked.
+4. **Autopilot edits your pods.** It added a 1 GiB `ephemeral-storage` request
+   to the service and invented CPU for the `helm test` pod, with a warning. A
+   platform that bills by request has to make sure every pod has one; the test
+   pod now declares its own rather than having one made up for it.
+5. **The machine was Google's choice, and a big one.** An `ek-standard-8` for a
+   2-vCPU pod looks wasteful, but Autopilot bills the pod's requests, not the
+   node — the node size is Google's packing problem, not a line on the bill.
+
 
 **Explain-back** *(mine, after the task)*:
 

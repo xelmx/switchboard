@@ -20,7 +20,7 @@ Work in progress. `NOTES.md` is the running log, one entry per tool.
 | 2 | the container | Docker | done — explain-back pending |
 | 3 | a local cluster | Kubernetes (Docker Desktop) | done — explain-back pending |
 | 4 | packaging | Helm | done — explain-back pending |
-| 5 | the cloud, from code | Terraform + GKE Autopilot | written & validated — needs a GCP account |
+| 5 | the cloud, from code | Terraform + GKE Autopilot | done — explain-back pending |
 | 6 | seeing it | Prometheus + Grafana | |
 | 7 | scaling | KEDA | |
 | 8 | canary | Argo Rollouts | |

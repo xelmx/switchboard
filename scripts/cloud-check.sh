@@ -27,7 +27,7 @@ check "VM instances"                compute instances list
 check "persistent disks"            compute disks list
 check "running Cloud Builds"        builds list --ongoing
 echo "-- kept on purpose (storage, cents per month) --"
-gcloud artifacts repositories list --format='table(name,sizeBytes.size(units_out=G))' 2>/dev/null
+gcloud artifacts repositories list --format='table(name,sizeBytes.size(units_out=G,precision=1):label=SIZE_GB)' 2>/dev/null
 echo
 if [ $found -eq 0 ]; then
   echo "NOTHING RUNNING - safe to walk away."
