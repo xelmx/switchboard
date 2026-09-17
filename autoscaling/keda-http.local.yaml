@@ -1,0 +1,8 @@
+# KEDA HTTP add-on 0.16.0 - ALPHA, "not for production" by its own README.
+# Here only to show demand-driven scale-to-zero, which KEDA alone can't do.
+#   helm upgrade --install http-add-on kedacore/keda-add-ons-http --version 0.16.0 -n keda -f autoscaling/keda-http.local.yaml
+interceptor:
+  # The proxy every request passes through. Three copies by default; one on a laptop.
+  replicas:
+    min: 1
+    max: 1

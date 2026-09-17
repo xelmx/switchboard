@@ -92,3 +92,15 @@ def test_metrics_expose_the_request_just_made(client):
     assert "switchboard_in_flight 0.0" in text
     assert "switchboard_ready 1.0" in text
     assert 'switchboard_model_info{' in text and 'class="FakeModel"' in text
+
+
+def test_fake_rtf_makes_the_fake_take_as_long_as_a_real_model():
+    # FAKE_RTF is what lets scaling be proven without 3 GB pods: the fake holds
+    # the inference lock for rtf x audio seconds, like the real model would.
+    settings = config.Settings(fake_model=True, fake_rtf=0.4)
+    with TestClient(app_module.create_app(settings, load_in_background=False)) as c:
+        r = c.post("/v1/transcribe", files={"file": ("a.wav", wav_bytes(1.0), "audio/wav")})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["model"]["rtf"] == 0.4
+    assert 380 <= body["inference_ms"] < 1000

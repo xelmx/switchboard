@@ -5,6 +5,7 @@ DEVICE     auto | cpu | cuda            (auto: cuda if available)
 DTYPE      auto | fp32 | fp16 | bf16    (auto: fp32 - the model card's default)
 PORT       listening port
 FAKE_MODEL 1 -> a stub that never loads weights; for tests and cluster dry-runs
+FAKE_RTF   with FAKE_MODEL: seconds of pretend inference per second of audio
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ class Settings:
     dtype: str = os.environ.get("DTYPE", "auto")
     port: int = int(os.environ.get("PORT", "8000"))
     fake_model: bool = os.environ.get("FAKE_MODEL", "0") == "1"
+    fake_rtf: float = float(os.environ.get("FAKE_RTF", "0"))
     max_audio_seconds: float = float(os.environ.get("MAX_AUDIO_SECONDS", "60"))
 
 

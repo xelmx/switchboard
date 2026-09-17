@@ -799,3 +799,153 @@ would fix that too; a bigger single copy would not fix the queue.
 - 
 
 ---
+
+## Task 7 — scaling (KEDA)
+
+**What it is.** Kubernetes already has an autoscaler, the
+HorizontalPodAutoscaler, but out of the box it only knows CPU and memory. KEDA
+("Kubernetes Event-Driven Autoscaling") feeds it anything else — a Prometheus
+query, a queue length, a schedule — and adds the one thing the HPA can't do:
+go to **zero** replicas and come back. You write a `ScaledObject`; KEDA writes
+and drives the HPA.
+
+**Why it's here.** Task 6 measured the problem: four callers against one
+replica gave *no* more throughput than one caller, only a queue — p95 went from
+1.6 s to 10.2 s. The fix is more copies, but only while there is demand. A model
+server that holds 3 GB of RAM (or a whole GPU) around the clock for traffic that
+arrives in bursts is the most expensive way to run one.
+
+**What goes wrong without it.** You size for the peak and pay for it all night,
+or size for the average and queue at the peak. CPU-based autoscaling is the
+usual first attempt and it is the wrong signal here: a pod waiting on its model
+lock is busy by any user's definition while its CPU tells you very little
+(and on a GPU pod, CPU says nothing at all).
+
+**The signal: demand, in the service's own words.** The average number of
+requests inside the service — running or queued — over the last minute,
+computed from the request-time counter (see the first lesson below for why
+not from the in-flight gauge). One
+replica serves one request at a time (the model lock), so the target is **one
+request in flight per replica**: four concurrent callers ask for four replicas.
+
+**A fake that behaves like the model.** Four real replicas need ~12 GB this
+machine doesn't have. `FAKE_RTF` (new in image `0.2`) makes the fake model hold
+the inference lock for as long as the real one would — 0.185 s per second of
+audio, the real-time factor measured in task 6 — so queueing and scaling behave
+the same at ~150 MB a pod. What it can't reproduce is the real cold start
+(weights into memory), which task 9 measures on the GPU.
+
+**Two modes, one switch** (`autoscaling.mode`):
+
+- **`prometheus`** — a KEDA `ScaledObject` with a Prometheus trigger, 1..4
+  replicas. Stable KEDA 2.20.2. The production answer.
+- **`http`** — a `HTTPScaledObject` from the KEDA **HTTP add-on** (0.16.0,
+  released two days before this task and labelled *alpha, not for production*
+  in its own README), 0..4 replicas. The add-on generates its own ScaledObject,
+  so the two modes can't be on together.
+
+**Why scale-to-zero needs a second tool.** The Prometheus trigger reads a
+number that the *pods* report. At zero pods there is no number, and a request
+sent to a Service with no endpoints is refused on the spot — it never queues
+anywhere, so nothing ever registers as demand. A Prometheus-triggered service
+allowed to reach zero stays there. The HTTP add-on fixes this by putting a
+proxy (the *interceptor*) in front: it exists when the service doesn't, counts
+requests itself, holds them while KEDA starts a pod, then forwards them. The
+proof demonstrates the trap first, then the fix.
+
+**One template change that matters.** With autoscaling on, the Deployment no
+longer sets `replicas`. If it did, every `helm upgrade` would reset the count
+to `replicaCount` and fight the autoscaler — a classic source of "why did my
+pods just drop to two".
+
+**The proof:**
+
+```
+wsl -d Ubuntu-24.04 -- bash -lc 'cd /mnt/c/Users/lyle/Projects/xelmx/switchboard && bash scripts/prove-task7.sh'
+```
+
+Free, local. Latency is timed by the client, per request — not read back from
+histogram buckets (task 6's lesson).
+
+**What it measured (2026-09-17, fake pods at the real model's timing, 4 callers):**
+
+| prometheus mode, 1..4 replicas | result |
+|---|---:|
+| load start → 4 ready replicas | 71 s (1 → 2 → 3 → 4 as demand rose) |
+| demand signal once scaled | 3.9 – 4.2 (four callers) |
+| client p95, first 30 s on one replica | 4.96 s |
+| client p95, after scaling | 3.69 s |
+| requests / failed | 449 / **0** |
+| deepest queue per pod while scaled | 1, 1, 2, 2 |
+| load stopped → back to 1 replica | 105 s |
+
+| the trap: same trigger, minReplicas 0 | result |
+|---|---:|
+| idle → 0 replicas | 20 s |
+| a request at zero | HTTP 000 — refused, not queued |
+| replicas after 90 s of requests | **0** |
+
+| http mode (add-on, alpha), 0..4 replicas | result |
+|---|---:|
+| request with zero pods running | **200 in 6.06 s** |
+| the next request, warm | 200 in 1.25 s |
+| peak replicas under 4 callers / failed | 4 / 0 |
+| client p95 while scaled | 3.67 s |
+| load stopped → back to 0 | 68 s |
+
+**Four replicas for four callers still queues.** One request takes 1.2 s, yet
+p95 with four replicas was 3.7 s — three requests' worth. The Service picks a
+pod *at random* for each connection, so two callers regularly land on the same
+pod while another sits idle: the deepest queue per pod was 2 on half of them.
+Scaling to the number of callers is necessary, not sufficient. The fixes are a
+little headroom (target below 1 per replica) or smarter routing
+(least-requests, which a mesh or Gateway API can do and kube-proxy cannot).
+
+**Cold start from zero cost ~4.8 s** on top of a warm request — for a fake pod
+that loads nothing. A real Parakeet pod adds its weight load on top, and on
+GKE a new node and a 6.6 GB image pull (217 s in task 5). Scale-to-zero is a
+cost decision paid for in first-request latency; for a phone line, where the
+caller is already waiting, it probably belongs only on internal or batch
+traffic.
+
+**Five things learned the hard way:**
+
+1. **Summing a gauge across pods is not a snapshot.** The first version scaled
+   on `sum(max_over_time(switchboard_in_flight[1m]))` and read **7–9** for four
+   callers. Prometheus scrapes each pod at a different moment; a caller that
+   moved from pod A to pod B between the two scrapes is counted on both. Tested
+   against a single pod the gauge was exact (never above 2 for 2 callers), and
+   the server's request counter matched the client's to the request (483.8 vs
+   483) — so nothing was duplicated; the *sampling* was. The fix reads a
+   counter instead: `sum(rate(switchboard_request_seconds_sum[1m]))` —
+   request-seconds accumulated per second *is* the average concurrency
+   (Little's law) — and read 3.9–4.2.
+2. **The correct signal is slower.** With the over-counting query the service
+   reached four replicas in 20 s; with the correct one, 71 s. A rate over a
+   minute of *completed* requests only notices a queue once requests have
+   waited in it. The wrong query scaled faster precisely because it was wrong.
+   Faster honest options: a shorter window, or scaling on queue depth.
+3. **A Grafana memory limit took the control plane down.** With 512 Mi, Grafana
+   13 — which runs each of its thirteen built-in data sources as a separate
+   process — sat at its limit and was never OOM-killed. It thrashed instead:
+   2.1 million limit hits and 98 million re-reads of its own files, disk
+   pressure at 77 % "full", node load 37, etcd timing out, the API server
+   killed by its liveness probe, the scheduler in CrashLoopBackOff. Fixed with
+   a 1 Gi limit and `disable_plugins` for the twelve unused data sources: one
+   plugin process, 402 Mi, zero limit hits. A limit slightly too low is worse
+   than one far too low — the second fails loudly.
+4. **`kubectl -o jsonpath` prints a missing field as nothing — no newline.**
+   `sed 's/^$/0/'` then has no line to act on, "0 replicas" read as blank, and
+   the wait for zero timed out while the cluster sat at zero. Defaulted in the
+   shell.
+5. **An autoscaled Deployment must not set `replicas`,** or every `helm
+   upgrade` resets the count; and switching KEDA modes needs the add-on's own
+   ScaledObject gone first, because Helm won't adopt an object it didn't
+   create.
+
+
+**Explain-back** *(mine, after the task)*:
+
+- 
+
+---

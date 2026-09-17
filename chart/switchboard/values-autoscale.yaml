@@ -1,0 +1,18 @@
+# Task 7: autoscaling on a laptop. Fake pods that take as long as real ones.
+#
+#   helm upgrade --install switchboard chart/switchboard -n switchboard \
+#     -f chart/switchboard/values-autoscale.yaml -f chart/switchboard/values-monitoring.yaml
+image:
+  tag: "0.2"      # the first image with FAKE_RTF
+model:
+  fake: true
+  fakeRtf: 0.185  # the real model's measured real-time factor on this CPU
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { cpu: "1", memory: 512Mi }
+probes:
+  startup:
+    periodSeconds: 2
+    failureThreshold: 15
+autoscaling:
+  enabled: true

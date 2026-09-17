@@ -44,9 +44,18 @@ grafana:
     auth.anonymous:
       enabled: true
       org_role: Viewer
+    plugins:
+      # Grafana 13 runs each built-in data source as its own process, thirteen
+      # of them, started at boot whether used or not. Only Prometheus is used
+      # here (Alertmanager is not a backend plugin). See NOTES, task 7.
+      disable_plugins: "elasticsearch,grafana-postgresql-datasource,grafana-pyroscope-datasource,influxdb,jaeger,loki,mssql,mysql,opentsdb,stackdriver,tempo,zipkin"
+  # 512Mi was too small: Grafana never got OOM-killed, it thrashed - evicting
+  # and re-reading its own plugin binaries ~98 million times - until the I/O
+  # starved etcd and the control plane restarted. A limit that is slightly too
+  # low is worse than one that is far too low: the second one fails loudly.
   resources:
-    requests: { cpu: 50m, memory: 256Mi }
-    limits: { memory: 512Mi }
+    requests: { cpu: 50m, memory: 384Mi }
+    limits: { memory: 1Gi }
 
 # Docker Desktop runs the control plane inside one container and does not
 # expose these components to scraping. Left on, they appear as permanently

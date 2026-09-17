@@ -30,23 +30,29 @@ class Transcriber(Protocol):
 
 
 class FakeModel:
-    """Returns a fixed phrase; costs nothing. FAKE_MODEL=1."""
+    """Returns a fixed phrase; costs no memory. FAKE_MODEL=1.
+
+    `rtf` (FAKE_RTF) makes it take as long as a real model would: it sleeps
+    `rtf` seconds per second of audio while holding the inference lock, so
+    queueing, latency and scaling behave like the real thing at a fraction of
+    the memory. 0 (the default) answers instantly.
+    """
 
     device = "cpu"
     dtype = "none"
 
-    def __init__(self, delay_s: float = 0.0):
+    def __init__(self, rtf: float = 0.0):
         t0 = time.perf_counter()
-        self.delay_s = delay_s
+        self.rtf = rtf
         self.load_seconds = time.perf_counter() - t0
 
     def transcribe(self, audios: list[np.ndarray]) -> list[str]:
-        if self.delay_s:
-            time.sleep(self.delay_s)
+        if self.rtf:
+            time.sleep(self.rtf * sum(len(a) for a in audios) / SR)
         return [f"fake transcript of {len(a) / SR:.1f} seconds" for a in audios]
 
     def info(self) -> dict:
-        return {"class": "FakeModel", "device": self.device, "dtype": self.dtype}
+        return {"class": "FakeModel", "device": self.device, "dtype": self.dtype, "rtf": self.rtf}
 
 
 class ParakeetModel:
@@ -109,5 +115,5 @@ def _load_checked(cls, model_id: str, **kw):
 
 def build(settings) -> Transcriber:
     if settings.fake_model:
-        return FakeModel()
+        return FakeModel(rtf=settings.fake_rtf)
     return ParakeetModel(settings.model_id, settings.device, settings.dtype)

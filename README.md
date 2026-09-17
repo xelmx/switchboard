@@ -22,7 +22,7 @@ Work in progress. `NOTES.md` is the running log, one entry per tool.
 | 4 | packaging | Helm | done — explain-back pending |
 | 5 | the cloud, from code | Terraform + GKE Autopilot | done — explain-back pending |
 | 6 | seeing it | Prometheus + Grafana | done — explain-back pending |
-| 7 | scaling | KEDA | |
+| 7 | scaling | KEDA (+ HTTP add-on for scale-to-zero) | done — explain-back pending |
 | 8 | canary | Argo Rollouts | |
 | 9 | the GPU + the numbers | local RTX 4060 (the GCP trial allows no GPUs), DCGM, k6 | |
 | 10 | Azure appendix | Terraform azurerm + AKS | |

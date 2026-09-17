@@ -20,6 +20,10 @@ model:
   # cluster mechanics (rollout, rollback, scheduling) be proven on a host with
   # no spare memory. Never true for a real measurement.
   fake: false
+  # With fake: seconds of pretend inference per second of audio. 0.185 is what
+  # the real model measured on this laptop's CPU (task 6) - so a fake pod queues
+  # and scales like a real one, in ~150 MB instead of ~3 GB.
+  fakeRtf: 0
 
 # Anything else to put in the container's environment, as name/value pairs.
 extraEnv: []
@@ -89,6 +93,29 @@ metrics:
   # A Grafana dashboard, shipped as a ConfigMap the Grafana sidecar picks up.
   dashboard:
     enabled: false
+
+# Task 7. Needs KEDA installed (and, for mode: http, the KEDA HTTP add-on).
+autoscaling:
+  enabled: false
+  # prometheus - scale 1..N on requests in flight, read from Prometheus. Stable.
+  # http       - scale 0..N through the HTTP add-on's interceptor, which holds
+  #              requests while a pod cold-starts. The add-on is alpha.
+  mode: prometheus
+  minReplicas: 1
+  maxReplicas: 4
+  # One replica serves one request at a time (the model lock), so the target is
+  # one request per replica: 4 concurrent requests want 4 replicas.
+  targetInFlightPerReplica: 1
+  pollingInterval: 15
+  # How long demand must stay low before replicas are removed. Short here so
+  # the proof finishes; production would keep the HPA default of 5 minutes.
+  scaleDownWindowSeconds: 60
+  prometheus:
+    serverAddress: http://kps-kube-prometheus-stack-prometheus.monitoring.svc:9090
+  http:
+    host: switchboard.local
+    # How long the interceptor holds a request while the first pod starts.
+    coldStartWait: 120s
 # The image `helm test` runs. Only needs curl.
 tests:
   image: curlimages/curl:8.11.1

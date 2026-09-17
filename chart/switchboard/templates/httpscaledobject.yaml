@@ -1,0 +1,31 @@
+{{- if and .Values.autoscaling.enabled (eq .Values.autoscaling.mode "http") }}
+{{- $a := .Values.autoscaling }}
+# Scale-to-zero needs something that exists when the service doesn't. The HTTP
+# add-on's interceptor is that thing: requests go to it, it counts them, holds
+# them while KEDA starts a pod, then forwards. The add-on creates its own KEDA
+# ScaledObject from this, so the two modes cannot be on at the same time.
+apiVersion: http.keda.sh/v1alpha1
+kind: HTTPScaledObject
+metadata:
+  name: {{ include "switchboard.fullname" . }}
+  labels:
+    {{- include "switchboard.labels" . | nindent 4 }}
+spec:
+  hosts:
+    - {{ $a.http.host }}
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "switchboard.fullname" . }}
+    service: {{ include "switchboard.fullname" . }}
+    port: {{ .Values.service.port }}
+  replicas:
+    min: {{ $a.minReplicas }}
+    max: {{ $a.maxReplicas }}
+  scaledownPeriod: {{ $a.scaleDownWindowSeconds }}
+  scalingMetric:
+    concurrency:
+      targetValue: {{ $a.targetInFlightPerReplica }}
+  timeouts:
+    conditionWait: {{ $a.http.coldStartWait }}
+{{- end }}

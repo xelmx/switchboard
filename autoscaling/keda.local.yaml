@@ -1,0 +1,12 @@
+# KEDA 2.20.2 on the laptop. Defaults, with the memory capped.
+#   helm upgrade --install keda kedacore/keda --version 2.20.2 -n keda --create-namespace -f autoscaling/keda.local.yaml
+resources:
+  operator:
+    requests: { cpu: 50m, memory: 100Mi }
+    limits: { memory: 512Mi }
+  metricServer:
+    requests: { cpu: 50m, memory: 100Mi }
+    limits: { memory: 512Mi }
+  webhooks:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { memory: 256Mi }

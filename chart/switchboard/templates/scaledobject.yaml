@@ -1,0 +1,47 @@
+{{- if and .Values.autoscaling.enabled (eq .Values.autoscaling.mode "prometheus") }}
+{{- $a := .Values.autoscaling }}
+{{- $job := include "switchboard.fullname" . }}
+# KEDA turns this into a HorizontalPodAutoscaler fed by a Prometheus query.
+# The query is demand: the average number of requests inside the service -
+# running plus queued - over the last minute. It is computed from a counter,
+# not read from the in-flight gauge: request-seconds accumulated per second
+# *is* the average concurrency (Little's law, L = lambda x W). Summing the
+# gauge across pods does not work - each pod is scraped at a different moment,
+# a caller that moved between pods in the meantime is counted on both, and
+# four callers read as eight (NOTES, task 7).
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "switchboard.fullname" . }}
+  labels:
+    {{- include "switchboard.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ include "switchboard.fullname" . }}
+  minReplicaCount: {{ $a.minReplicas }}
+  maxReplicaCount: {{ $a.maxReplicas }}
+  pollingInterval: {{ $a.pollingInterval }}
+  # Only used for the last step, 1 -> 0 (the HPA handles N -> 1).
+  cooldownPeriod: {{ $a.scaleDownWindowSeconds }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+        scaleDown:
+          stabilizationWindowSeconds: {{ $a.scaleDownWindowSeconds }}
+          # One pod at a time, so a dip in traffic doesn't drop everything at once.
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 15
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: {{ $a.prometheus.serverAddress }}
+        query: sum(rate(switchboard_request_seconds_sum{job="{{ $job }}",namespace="{{ .Release.Namespace }}"}[1m]))
+        threshold: {{ $a.targetInFlightPerReplica | quote }}
+        # With minReplicas 0 this is the wake-up condition - and it can never be
+        # met: at zero pods there is nobody to report request times.
+        activationThreshold: "0"
+{{- end }}

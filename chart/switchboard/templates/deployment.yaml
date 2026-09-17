@@ -8,7 +8,11 @@ metadata:
   labels:
     {{- include "switchboard.labels" . | nindent 4 }}
 spec:
+  {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  # With autoscaling on, the replica count belongs to the autoscaler. Setting it
+  # here too would make every `helm upgrade` reset it - the two would fight.
   selector:
     matchLabels:
       {{- include "switchboard.selectorLabels" . | nindent 6 }}
@@ -60,6 +64,8 @@ spec:
             {{- if .Values.model.fake }}
             - name: FAKE_MODEL
               value: "1"
+            - name: FAKE_RTF
+              value: {{ .Values.model.fakeRtf | quote }}
             {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}

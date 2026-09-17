@@ -5,8 +5,8 @@ type: application
 
 # version    — the chart's own version. Bump when the templates change.
 # appVersion — the software inside. Here it tracks the image tag.
-version: 0.1.0
-appVersion: "dev"
+version: 0.2.0
+appVersion: "0.2"
 
 home: https://github.com/xelmx/switchboard
 sources:
